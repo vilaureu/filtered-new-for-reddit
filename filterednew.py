@@ -10,20 +10,31 @@
 # You should have received a copy of the GNU General Public License along with
 # this program. If not, see <https://www.gnu.org/licenses/>.
 
+from atomicwrites import atomic_write
+from collections import defaultdict
 from configparser import ConfigParser, SectionProxy
+import json
 from praw import Reddit
 import re
+from typing import List
 
 REDDIT_URL = "https://www.reddit.com"
 CONFIG_FILE = "filterednew.ini"
+LOG_FILE = "filterednew.log"
 DEFAULT_LIMIT = 10
 DEFAULT_KEEP = 20
 DEFAULT_IGNORE_CASE = True
 
 
-def subreddit(sub: str, config: SectionProxy, reddit: Reddit):
+def yield_dedup(a: List, b: List):
+    for x in a:
+        if x not in b:
+            yield x
+    yield from b
+
+
+def subreddit(sub: str, config: SectionProxy, reddit: Reddit, log: List[str]):
     limit = config.getint("Limit", DEFAULT_LIMIT)
-    keep = config.getint("Keep", DEFAULT_KEEP)
     ignore_case = config.getboolean("IgnoreCase", DEFAULT_IGNORE_CASE)
 
     flags = re.IGNORECASE if ignore_case else 0
@@ -38,7 +49,12 @@ def subreddit(sub: str, config: SectionProxy, reddit: Reddit):
         selftext = submission.selftext
         url = submission.url
         permalink = submission.permalink
+        sid = submission.id
         content = selftext if is_self else url
+
+        yield sid
+        if sid in log:
+            continue
 
         if not regex.search(title) and not regex.search(content):
             continue
@@ -59,8 +75,26 @@ def main():
 
     config = ConfigParser()
     config.read(CONFIG_FILE)
+
+    try:
+        with open(LOG_FILE, "r") as f:
+            log = json.load(f)
+    except IOError:
+        log = {}
+    log = defaultdict(list, log)
+    log_new = {}
+
     for section in config.sections():
-        subreddit(section, config[section], reddit)
+        new_posts = subreddit(section, config[section], reddit, log[section])
+        new_posts = list(new_posts)
+        new_posts.reverse()
+        log_new[section] = list(yield_dedup(log[section], new_posts))
+
+        keep = config[section].getint("Keep", DEFAULT_KEEP)
+        log_new[section] = log_new[section][-keep:]
+
+    with atomic_write(LOG_FILE, overwrite=True) as f:
+        json.dump(log_new, f)
 
 
 if __name__ == "__main__":
