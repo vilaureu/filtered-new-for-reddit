@@ -53,6 +53,9 @@ In the directory with your configuration files execute the python file:
 
 `$ python3 filterednew.py`
 
+The exit code is _0_ on success, _1_ on error and _2_ if no new posts where
+found.
+
 ## License
 
 This program is free software: you can redistribute it and/or modify it under

@@ -16,7 +16,7 @@ from configparser import ConfigParser, SectionProxy
 import json
 from praw import Reddit
 import re
-from typing import List, Iterator
+from typing import List, Iterator, Tuple
 
 REDDIT_URL = "https://www.reddit.com"
 CONFIG_FILE = "filterednew.ini"
@@ -35,14 +35,14 @@ def yield_dedup(a: List, b: List) -> Iterator:
 
 
 def subreddit(sub: str, config: SectionProxy, reddit: Reddit, log: List[str]) \
-        -> Iterator[str]:
+        -> Tuple[List[str], bool]:
     """Process a subreddit by retrieving and filtering submissions.
 
     :param sub: name of the subreddit
     :param config: configuration file section describing the subreddit
     :param reddit: reddit API object
     :param log: previous submission ids from the log file
-    :yield: the processed submission ids
+    :return: the processed submission ids and whether there was any output
     """
     limit = config.getint("Limit", DEFAULT_LIMIT)
     ignore_case = config.getboolean("IgnoreCase", DEFAULT_IGNORE_CASE)
@@ -53,6 +53,8 @@ def subreddit(sub: str, config: SectionProxy, reddit: Reddit, log: List[str]) \
     regex_body = re.compile(config.get("RegexBody", ""), flags)
     regex_url = re.compile(config.get("RegexUrl", ""), flags)
 
+    any_output = False
+    ids = []
     for submission in reddit.subreddit(sub).new(limit=limit):
         title = submission.title
         is_self = submission.is_self
@@ -62,7 +64,7 @@ def subreddit(sub: str, config: SectionProxy, reddit: Reddit, log: List[str]) \
         sid = submission.id
         content = selftext if is_self else url
 
-        yield sid
+        ids.append(sid)
         if sid in log:
             continue
 
@@ -75,9 +77,14 @@ def subreddit(sub: str, config: SectionProxy, reddit: Reddit, log: List[str]) \
         if not is_self and not regex_url.search(url):
             continue
 
+        if not any_output:
+            print("==", sub, "==")
+            any_output = True
         print(title)
         print("@", REDDIT_URL + permalink)
         print()
+
+    return ids, any_output
 
 
 def main():
@@ -97,17 +104,22 @@ def main():
     log = defaultdict(list, log)
     log_new = {}
 
+    any_new_post = False
     for section in config.sections():
-        new_posts = subreddit(section, config[section], reddit, log[section])
-        new_posts = list(new_posts)
+        (new_posts, any_output) = subreddit(
+            section, config[section], reddit, log[section])
         new_posts.reverse()
         log_new[section] = list(yield_dedup(log[section], new_posts))
 
         keep = config[section].getint("Keep", DEFAULT_KEEP)
         log_new[section] = log_new[section][-keep:]
 
+        any_new_post |= any_output
+
     with atomic_write(LOG_FILE, overwrite=True) as f:
         json.dump(log_new, f)
+
+    exit(0 if any_new_post else 2)
 
 
 if __name__ == "__main__":
