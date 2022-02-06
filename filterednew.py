@@ -16,7 +16,7 @@ from configparser import ConfigParser, SectionProxy
 import json
 from praw import Reddit
 import re
-from typing import List
+from typing import List, Iterator
 
 REDDIT_URL = "https://www.reddit.com"
 CONFIG_FILE = "filterednew.ini"
@@ -26,14 +26,24 @@ DEFAULT_KEEP = 20
 DEFAULT_IGNORE_CASE = True
 
 
-def yield_dedup(a: List, b: List):
+def yield_dedup(a: List, b: List) -> Iterator:
+    """Yield contents from a which are not in b and then yield from b."""
     for x in a:
         if x not in b:
             yield x
     yield from b
 
 
-def subreddit(sub: str, config: SectionProxy, reddit: Reddit, log: List[str]):
+def subreddit(sub: str, config: SectionProxy, reddit: Reddit, log: List[str]) \
+        -> Iterator[str]:
+    """Process a subreddit by retrieving and filtering submissions.
+
+    :param sub: name of the subreddit
+    :param config: configuration file section describing the subreddit
+    :param reddit: reddit API object
+    :param log: previous submission ids from the log file
+    :yield: the processed submission ids
+    """
     limit = config.getint("Limit", DEFAULT_LIMIT)
     ignore_case = config.getboolean("IgnoreCase", DEFAULT_IGNORE_CASE)
 
@@ -71,6 +81,9 @@ def subreddit(sub: str, config: SectionProxy, reddit: Reddit, log: List[str]):
 
 
 def main():
+    """
+    Connect to the reddit API, read the config file and process the subreddits.
+    """
     reddit = Reddit()
 
     config = ConfigParser()
